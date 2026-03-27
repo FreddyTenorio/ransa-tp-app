@@ -1,6 +1,5 @@
 <template>
   <div :class="{ 'sorting-active': sortingActive }">
-    <!-- PANEL SUPERIOR FIJO -->
     <div class="top-panel">
       <div class="panel-content">
         <h3 style="margin: 0 0 10px 0; text-align: center; font-size: 1.1em;">🚛 Gestión TP - Sincronizado</h3>
@@ -9,13 +8,23 @@
           <div class="stat-item"><span class="stat-val" style="color: #17a2b8;">{{ countLoc }}</span><span class="stat-lbl">Ubic.</span></div>
           <div class="stat-item"><span class="stat-val" style="color: #28a745;">{{ countDel }}</span><span class="stat-lbl">Listos</span></div>
         </div>
+
+        <div class="search-filter-row" v-show="!sortingActive">
+          <input type="text" v-model="searchName" placeholder="🔍 Buscar cliente por nombre..." class="search-input">
+          <div class="type-chips">
+            <button @click="typeFilter = 'TODOS'" :class="{ active: typeFilter === 'TODOS' }">Todos</button>
+            <button @click="typeFilter = 'ENTREGA'" :class="{ active: typeFilter === 'ENTREGA', 'active-ent': typeFilter === 'ENTREGA' }">Entregas</button>
+            <button @click="typeFilter = 'RECOJO'" :class="{ active: typeFilter === 'RECOJO', 'active-rec': typeFilter === 'RECOJO' }">Recojos</button>
+            <button @click="typeFilter = 'INTERCAMBIO'" :class="{ active: typeFilter === 'INTERCAMBIO', 'active-int': typeFilter === 'INTERCAMBIO' }">Interc.</button>
+          </div>
+        </div>
+
         <div class="top-controls">
-          <button class="btn-toggle-filters" @click="filtersOpen = !filtersOpen">🔽 Filtros</button>
+          <button class="btn-toggle-filters" @click="filtersOpen = !filtersOpen">🔽 Filtros Extra</button>
           <button class="btn-sort-mode" :class="{ active: sortingActive }" @click="toggleSortMode">
             {{ sortingActive ? '✅ Guardar Orden' : '⇄ Organizar' }}
           </button>
         </div>
-        <!-- Filtros -->
         <div class="filters-container" :class="{ open: filtersOpen }">
           <div class="filters-row">
             <div class="filter-toggle">
@@ -31,20 +40,18 @@
       </div>
     </div>
 
-    <!-- LISTA DE CLIENTES -->
-    <div id="lista" ref="listaRef" style="padding-top: 150px; padding-bottom: 100px;">
+    <div id="lista" ref="listaRef" style="padding-top: 240px; padding-bottom: 100px;">
       <div v-if="ruta.length === 0" class="empty-state">
         <span class="empty-icon">☁️</span>
         <h3>Base de datos vacía</h3>
         <p>Abre el Menú ⚙️ y carga tu archivo Excel.</p>
       </div>
 
-      <!-- TARJETAS -->
       <div 
         v-for="(c, index) in ruta" 
         :key="c.guid" 
         class="card"
-        :class="{ 'is-delivered': c.del, 'has-location': c.loc, 'hidden': isHidden(c) }"
+        :class="{ 'is-delivered': c.del, 'has-location': c.loc, 'is-cancelled': c.cancelado, 'hidden': isHidden(c) }"
         :data-id="c.guid"
       >
         <div class="header">
@@ -60,28 +67,25 @@
           </div>
         </div>
 
-        <!-- Info visible del cliente -->
         <div class="card-info">
           <div><strong>📍 Dir:</strong> {{ c.addr }}</div>
           <div><strong>📦 Detalle:</strong> {{ c.desc }} <span v-if="c.cc">(CC: {{ c.cc }})</span></div>
         </div>
 
-        <!-- Botones de Acción Rápida -->
         <div class="actions">
           <a class="btn btn-call" :href="c.tel !== 'Sin Celular' ? 'tel:'+c.tel : '#'">Llamar</a>
           <a class="btn btn-msg1" :href="getLinkManana(c)" target="_blank">Mañana</a>
           <a class="btn btn-msg2" :href="getLinkCamino(c)" target="_blank">Ya voy</a>
         </div>
 
-        <!-- Botones de Reporte -->
         <div class="report-row">
           <a class="btn-report-issue btn-nowa" :href="getLinkNoWa(c, index+1)" target="_blank">🚫 Sin WA</a>
           <a class="btn-report-issue btn-wrong-num" :href="getLinkWrongNum(c, index+1)" target="_blank">📞❌ Num Error</a>
           <a class="btn-report-issue btn-bad-loc" :href="getLinkBadLoc(c, index+1)" target="_blank">📍❌ Ubic Mal</a>
-          <a class="btn-report-issue btn-rechazo" :href="getLinkRechazo(c)" target="_blank">⛔ Rechazo</a>
+          
+          <a class="btn-report-issue btn-rechazo" :href="getLinkRechazo(c)" target="_blank" @click="marcarRechazo(c)">⛔ Rechazo</a>
         </div>
 
-        <!-- Sección de Ubicación de Maps -->
         <div class="loc-section">
           <div class="loc-header">
             <div class="check-group">
@@ -105,7 +109,6 @@
       </div>
     </div>
 
-    <!-- MODAL DE EDICIÓN -->
     <div class="modal-overlay" :class="{ open: modalOpen }">
       <div class="modal-content">
         <div class="modal-header">
@@ -129,7 +132,6 @@
       </div>
     </div>
 
-    <!-- BOTÓN FLOTANTE Y MENÚ -->
     <div class="fab" @click="menuOpen = !menuOpen">⚙️</div>
     <div class="menu-overlay" :class="{ open: menuOpen }" @click="menuOpen = false"></div>
     <div class="slide-menu" :class="{ open: menuOpen }">
@@ -167,6 +169,10 @@ const modalOpen = ref(false);
 const modalData = ref(null);
 const listaRef = ref(null);
 let sortableInstance = null;
+
+// NUEVOS ESTADOS PARA BUSCADOR Y FILTROS
+const searchName = ref("");
+const typeFilter = ref("TODOS");
 
 // --- ESTADÍSTICAS ---
 const countLoc = computed(() => ruta.value.filter(c => c.loc).length);
@@ -279,10 +285,25 @@ const getLinkBadLoc = (c, num) => `https://wa.me/${numeroBase}?text=${encodeURIC
 const getLinkRechazo = (c) => `https://wa.me/${numeroBase}?text=${encodeURIComponent(`⚠️ REPORTE DE RECHAZO ⚠️\n*DNI:* ${c.dni || 'Sin DNI'}\n*Cliente:* ${c.nom}\n*Campaña:* ${c.cc || 'Sin CC'}\n*Motivo:* ${c.desc}`)}`;
 
 // --- INTERACCIÓN Y UI ---
+
+// NUEVA FUNCIÓN: Auto-Cancelar y Sincronizar en Nube
+const marcarRechazo = (c) => {
+  c.cancelado = true;
+  saveData(); // Esto dispara la actualización a todos los dispositivos en tiempo real
+};
+
+// ACTUALIZADO: isHidden ahora incluye los nuevos filtros
 const isHidden = (c) => {
   if (sortingActive.value) return false; 
   if (filters.value.hideLoc && c.loc) return true;
   if (filters.value.hideDel && c.del) return true;
+  
+  // Filtro por nombre
+  if (searchName.value && !c.nom.toLowerCase().includes(searchName.value.toLowerCase())) return true;
+  
+  // Filtro por tipo de carga
+  if (typeFilter.value !== 'TODOS' && c.tipo !== typeFilter.value) return true;
+  
   return false;
 };
 
@@ -395,6 +416,17 @@ const clearAllData = async () => {
 .stat-item { text-align: center; flex: 1; background: #343a40; border-radius: 5px; padding: 4px 0; }
 .stat-val { font-weight: bold; font-size: 1.1em; display: block; }
 .stat-lbl { font-size: 0.65em; text-transform: uppercase; color: #adb5bd; }
+
+/* NUEVO CSS BÚSQUEDA Y FILTROS */
+.search-filter-row { margin-top: 8px; margin-bottom: 8px; }
+.search-input { width: 100%; padding: 8px 12px; border-radius: 6px; border: none; font-size: 0.95em; box-sizing: border-box; margin-bottom: 8px; outline: none; }
+.type-chips { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px;}
+.type-chips button { flex: 1; border: none; padding: 6px 2px; border-radius: 6px; font-size: 0.75em; font-weight: bold; cursor: pointer; background: #495057; color: white; white-space: nowrap; }
+.type-chips button.active-ent { background: #0d6efd; color: white; }
+.type-chips button.active-rec { background: #6f42c1; color: white; }
+.type-chips button.active-int { background: #fd7e14; color: white; }
+.type-chips button.active { background: #ffc107; color: black; }
+
 .top-controls { display: flex; gap: 5px; margin-top: 5px; }
 .btn-toggle-filters { flex: 1; background: #495057; border: 1px solid #6c757d; color: white; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 0.9em; cursor: pointer; }
 .btn-sort-mode { flex: 1; background: #0d6efd; border: 1px solid #0a58ca; color: white; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 0.9em; cursor: pointer; }
@@ -408,10 +440,13 @@ const clearAllData = async () => {
 .empty-state { text-align: center; padding: 60px 20px; color: #6c757d; }
 .empty-icon { font-size: 4em; display: block; }
 
-.card { background: white; padding: 15px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.08); border-left: 6px solid #ffc107; }
+.card { background: white; padding: 15px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.08); border-left: 6px solid #ffc107; transition: all 0.3s ease; }
 .card.hidden { display: none !important; }
 .card.has-location { border-left-color: #17a2b8; } 
 .card.is-delivered { border-left-color: #28a745; background-color: #e2e6ea; opacity: 0.7; }
+/* Tarjeta gris y opaca cuando se marca Rechazo/Cancelado */
+.card.is-cancelled { opacity: 0.6; filter: grayscale(100%); border-left-color: #dc3545; }
+
 .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 8px; }
 .name { font-weight: bold; color: #333; font-size: 1.1em; display: block; line-height: 1.2; }
 .phone { color: #666; font-size: 0.9em; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
@@ -429,7 +464,7 @@ const clearAllData = async () => {
 .btn-msg1 { background-color: #25D366; }
 .btn-msg2 { background-color: #075e54; }
 .report-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; margin-bottom: 12px; }
-.btn-report-issue { display: flex; align-items: center; justify-content: center; gap: 3px; font-size: 0.65em; font-weight: bold; padding: 8px 2px; border-radius: 4px; text-decoration: none; border: 1px solid transparent; color: #333; text-align: center; }
+.btn-report-issue { display: flex; align-items: center; justify-content: center; gap: 3px; font-size: 0.65em; font-weight: bold; padding: 8px 2px; border-radius: 4px; text-decoration: none; border: 1px solid transparent; color: #333; text-align: center; cursor: pointer; }
 .btn-nowa { background-color: #e2e3e5; border-color: #d6d8db; }
 .btn-wrong-num { background-color: #fff3cd; border-color: #ffecb5; color: #856404; }
 .btn-bad-loc { background-color: #cff4fc; border-color: #b6effb; color: #055160; }
