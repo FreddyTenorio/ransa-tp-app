@@ -190,11 +190,29 @@ const typeFilter = ref("TODOS");
 const countLoc = computed(() => ruta.value.filter(c => c.loc).length);
 const countDel = computed(() => ruta.value.filter(c => c.del).length);
 
-// --- CONEXIÓN A FIREBASE EN TIEMPO REAL ---
+// --- CONEXIÓN A FIREBASE Y AUTO-REPARACIÓN DE ERRORES ---
 onMounted(() => {
   onSnapshot(docRef, (docSnap) => {
     if (docSnap.exists()) {
-      ruta.value = docSnap.data().lista || [];
+      let dataNube = docSnap.data().lista || [];
+
+      // PARCHE DE AUTO-REPARACIÓN: Si hay IDs duplicados en la nube, los repara automáticamente
+      const seen = new Set();
+      let necesitaReparar = false;
+
+      dataNube.forEach(item => {
+        if (seen.has(item.guid) || !item.guid) {
+          item.guid = 'id-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+          necesitaReparar = true;
+        }
+        seen.add(item.guid);
+      });
+
+      ruta.value = dataNube;
+
+      if (necesitaReparar) {
+        saveData(); // Actualiza la nube con los IDs ya limpios
+      }
     } else {
       ruta.value = [];
     }
@@ -248,7 +266,8 @@ const handleFileUpload = (event) => {
           }
 
           newRuta.push({
-            guid: row.GUIA ? String(row.GUIA) : Math.random().toString(36),
+            // GENERADOR DE ID 100% ÚNICO PARA QUE LA FUNCIÓN ORGANIZAR NUNCA FALLE
+            guid: 'id-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36),
             guia: row.GUIA ? String(row.GUIA) : "Sin Guía",
             dni: String(row.DOCUMENTO || row.Documento || "Sin DNI"),
             nom: row.NOMBRE || row.Nombre || "Sin Nombre",
@@ -302,16 +321,11 @@ const getLinkManana = (c) => {
 
 const getLinkCamino = (c) => c.tel !== "Sin Celular" ? `https://wa.me/${c.tel}?text=${encodeURIComponent("Estamos a X minutos de su ubicación.")}` : "#";
 
-// NUEVOS REPORTES CON NÚMERO DE GUÍA Y DNI
 const getLinkNoWa = (c) => `https://wa.me/${numeroBase}?text=${encodeURIComponent(`⚠️ REPORTE: SIN WHATSAPP\n*Guía:* ${c.guia}\n*DNI:* ${c.dni}\n*Cliente:* ${c.nom}`)}`;
-
 const getLinkWrongNum = (c) => `https://wa.me/${numeroBase}?text=${encodeURIComponent(`⚠️ REPORTE: NÚMERO EQUIVOCADO\n*Guía:* ${c.guia}\n*DNI:* ${c.dni}\n*Cliente:* ${c.nom}\n*Número registrado:* ${c.tel}`)}`;
-
 const getLinkBadLoc = (c) => `https://wa.me/${numeroBase}?text=${encodeURIComponent(`⚠️ REPORTE: UBICACIÓN INCORRECTA\n*Guía:* ${c.guia}\n*DNI:* ${c.dni}\n*Cliente:* ${c.nom}`)}`;
-
 const getLinkNoResp = (c) => `https://wa.me/${numeroBase}?text=${encodeURIComponent(`⚠️ REPORTE: NO RESPONDE LLAMADAS/MENSAJES\n*Guía:* ${c.guia}\n*DNI:* ${c.dni}\n*Cliente:* ${c.nom}`)}`;
 
-// REPORTE DE RECHAZO DETALLADO
 const getLinkRechazo = (c) => {
   const msg = `⚠️ REPORTE DE RECHAZO ⚠️
 *Guía:* ${c.guia}
@@ -366,7 +380,6 @@ const editPhone = (c) => {
   if (newTel) { c.tel = newTel.trim(); saveData(); }
 };
 
-// --- MODAL EDITAR ---
 const openModal = (c) => {
   modalData.value = { ...c };
   modalOpen.value = true;
@@ -382,32 +395,46 @@ const saveModalChanges = () => {
   modalOpen.value = false;
 };
 
-// --- MODO ORGANIZAR (SORTABLE) ---
+// --- MODO ORGANIZAR CORREGIDO ---
 const toggleSortMode = () => {
   sortingActive.value = !sortingActive.value;
 
   if (sortingActive.value) {
-    if (sortableInstance) sortableInstance.destroy();
-    sortableInstance = Sortable.create(listaRef.value, {
-      handle: '.drag-handle',
-      animation: 150,
-      ghostClass: 'sortable-ghost'
-    });
+    // 1. Apagamos TODOS los filtros para que la lista en pantalla sea exactamente igual a la base de datos
+    searchName.value = "";
+    typeFilter.value = "TODOS";
+    filters.value.hideLoc = false;
+    filters.value.hideDel = false;
     filtersOpen.value = false;
+
+    // 2. Le damos a Vue 100 milisegundos para renderizar todo antes de arrancar Sortable
+    setTimeout(() => {
+      if (sortableInstance) sortableInstance.destroy();
+      sortableInstance = Sortable.create(listaRef.value, {
+        handle: '.drag-handle',
+        animation: 150,
+        ghostClass: 'sortable-ghost'
+      });
+    }, 100);
   } else {
+    // 3. Al guardar, leemos el nuevo orden y lo pasamos al sistema
     const newRuta = [];
     document.querySelectorAll('.card').forEach(cardEl => {
       const guid = cardEl.getAttribute('data-id');
       const item = ruta.value.find(r => r.guid === guid);
       if (item) newRuta.push(item);
     });
+
     ruta.value = newRuta;
-    saveData();
-    if (sortableInstance) sortableInstance.destroy();
+    saveData(); // Mandamos el nuevo orden a Firebase
+
+    if (sortableInstance) {
+      sortableInstance.destroy();
+      sortableInstance = null;
+    }
   }
 };
 
-// --- DESCARGAR VCF ---
 const downloadVCF = () => {
   if (!ruta.value.length) return alert("❌ No hay datos en la nube.");
 
@@ -432,7 +459,6 @@ const downloadVCF = () => {
   menuOpen.value = false;
 };
 
-// --- LIMPIAR NUBE ---
 const clearAllData = async () => {
   if (confirm("⚠️ PELIGRO: ¿Borrar toda la ruta de la Nube para todos los usuarios?")) {
     ruta.value = [];
@@ -487,7 +513,6 @@ const clearAllData = async () => {
   color: #adb5bd;
 }
 
-/* CSS BÚSQUEDA Y FILTROS */
 .search-filter-row {
   margin-top: 8px;
   margin-bottom: 8px;
@@ -776,7 +801,6 @@ const clearAllData = async () => {
   background-color: #075e54;
 }
 
-/* NUEVO DISEÑO PARA LOS BOTONES DE REPORTE */
 .report-row {
   display: flex;
   flex-wrap: wrap;
